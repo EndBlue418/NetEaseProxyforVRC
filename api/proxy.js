@@ -1,27 +1,27 @@
 const fetch = require('node-fetch');
 
 module.exports = async (req, res) => {
+    // 允許跨域
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
-    const rawUrl = req.query.url; // 玩家輸入的完整網址
+    const rawUrl = req.query.url; // 玩家輸入的整串網址
     if (!rawUrl) {
         return res.status(400).json({ error: 'Missing url parameter' });
     }
 
     try {
-        // 從完整網址中自動用正则抓取 id (例如 id=3384000719)
+        // 自動從任何網易雲或 biliplayer 網址中用正規表達式把 id 抓出來
         const match = rawUrl.match(/id=([0-9]+)/);
         if (!match) {
-            return res.status(400).json({ error: 'Invalid NetEase Song ID in URL' });
+            return res.status(400).json({ error: 'Could not find song id in url' });
         }
         const songId = match[1];
 
-        // 自動拼湊你原本那套共用 API 的網址
+        // 呼叫你原本那套共用的網易雲 API
         const detailApi = `https://api-enhanced-endblue.vercel.app/song/detail?id=${songId}`;
         const lyricApi = `https://api-enhanced-endblue.vercel.app/lyric/new?id=${songId}`;
 
-        // 同時抓取詳情與歌詞
         const [detailRes, lyricRes] = await Promise.all([
             fetch(detailApi),
             fetch(lyricApi)
@@ -30,11 +30,14 @@ module.exports = async (req, res) => {
         const detailData = await detailRes.json();
         const lyricData = await lyricRes.json();
 
-        // 合併回傳給 Unity
+        // 整理並回傳乾淨的 JSON 給 VRChat
         return res.status(200).json({
-            songs: detailData.songs || detailData,
-            lrc: lyricData.lrc || {},
-            yrc: lyricData.yrc || {}
+            success: true,
+            songId: songId,
+            name: detailData.songs?.[0]?.name || detailData.name || "未知歌曲",
+            artist: detailData.songs?.[0]?.ar?.[0]?.name || detailData.ar?.[0]?.name || "未知歌手",
+            lrc: lyricData.lrc?.lyric || "",
+            yrc: lyricData.yrc?.lyric || ""
         });
 
     } catch (error) {
