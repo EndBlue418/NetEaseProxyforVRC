@@ -16,50 +16,30 @@ module.exports = async (req, res) => {
         }
         const songId = match[1];
 
-        // 核心修正：將 song/detail 改用目前相容性最高的 song/detail 複數參數或 song 路由
-        const detailApi = `https://api-enhanced-endblue.vercel.app/song/detail?ids=${songId}`;
+        // 只請求歌詞 API
         const lyricApi = `https://api-enhanced-endblue.vercel.app/lyric/new?id=${songId}`;
-
-        const [detailRes, lyricRes] = await Promise.all([
-            fetch(detailApi).catch(() => null),
-            fetch(lyricApi).catch(() => null)
-        ]);
-
-        let detailData = {};
-        if (detailRes && detailRes.ok) {
-            detailData = await detailRes.json();
-        }
-
+        const lyricRes = await fetch(lyricApi).catch(() => null);
         const lyricData = lyricRes && lyricRes.ok ? await lyricRes.json() : {};
 
-        let songName = "";
-        let artistName = "";
-
-        // 解析網易雲常見的幾種 songs 回傳結構
-        let songsList = detailData.songs || detailData.data || (detailData.name ? [detailData] : []);
-
-        if (songsList.length > 0) {
-            let songObj = songsList[0];
-            songName = songObj.name || songObj.title || "";
-
-            // 處理歌手陣列
-            let artists = songObj.ar || songObj.artists || songObj.singer;
-            if (Array.isArray(artists) && artists.length > 0) {
-                artistName = artists.map(a => a.name).join(' / ');
-            } else if (typeof songObj.artist === 'string') {
-                artistName = songObj.artist;
-            }
-        }
-
-        // 提取歌詞
         const lrcContent = lyricData.lrc?.lyric || lyricData.lyric || "";
         const yrcContent = lyricData.yrc?.lyric || "";
+
+        // 嘗試從 LRC 標頭提取歌名和歌手 (若有 [ti:] 和 [ar:])
+        let songName = "網易雲音樂";
+        let artistName = "同步歌詞";
+
+        if (lrcContent) {
+            const tiMatch = lrcContent.match(/\[ti:(.*?)\]/);
+            const arMatch = lrcContent.match(/\[ar:(.*?)\]/);
+            if (tiMatch && tiMatch[1].trim()) songName = tiMatch[1].trim();
+            if (arMatch && arMatch[1].trim()) artistName = arMatch[1].trim();
+        }
 
         return res.status(200).json({
             success: true,
             songId: songId,
-            name: songName || "未知歌曲",
-            artist: artistName || "未知歌手",
+            name: songName,
+            artist: artistName,
             lrc: lrcContent,
             yrc: yrcContent
         });
