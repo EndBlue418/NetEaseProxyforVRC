@@ -1,43 +1,67 @@
 const fetch = require('node-fetch');
 
 module.exports = async (req, res) => {
-    // 允許跨域
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
-    const rawUrl = req.query.url; // 玩家輸入的整串網址
+    const rawUrl = req.query.url;
     if (!rawUrl) {
         return res.status(400).json({ error: 'Missing url parameter' });
     }
 
     try {
-        // 自動從任何網易雲或 biliplayer 網址中用正規表達式把 id 抓出來
         const match = rawUrl.match(/id=([0-9]+)/);
         if (!match) {
             return res.status(400).json({ error: 'Could not find song id in url' });
         }
         const songId = match[1];
 
-        // 呼叫你原本那套共用的網易雲 API
-        const detailApi = `https://api-enhanced-endblue.vercel.app/song/detail?id=${songId}`;
+        // 核心修正：將 song/detail 改用目前相容性最高的 song/detail 複數參數或 song 路由
+        const detailApi = `https://api-enhanced-endblue.vercel.app/song/detail?ids=${songId}`;
         const lyricApi = `https://api-enhanced-endblue.vercel.app/lyric/new?id=${songId}`;
 
         const [detailRes, lyricRes] = await Promise.all([
-            fetch(detailApi),
-            fetch(lyricApi)
+            fetch(detailApi).catch(() => null),
+            fetch(lyricApi).catch(() => null)
         ]);
 
-        const detailData = await detailRes.json();
-        const lyricData = await lyricRes.json();
+        let detailData = {};
+        if (detailRes && detailRes.ok) {
+            detailData = await detailRes.json();
+        }
 
-        // 整理並回傳乾淨的 JSON 給 VRChat
+        const lyricData = lyricRes && lyricRes.ok ? await lyricRes.json() : {};
+
+        let songName = "";
+        let artistName = "";
+
+        // 解析網易雲常見的幾種 songs 回傳結構
+        let songsList = detailData.songs || detailData.data || (detailData.name ? [detailData] : []);
+
+        if (songsList.length > 0) {
+            let songObj = songsList[0];
+            songName = songObj.name || songObj.title || "";
+
+            // 處理歌手陣列
+            let artists = songObj.ar || songObj.artists || songObj.singer;
+            if (Array.isArray(artists) && artists.length > 0) {
+                artistName = artists.map(a => a.name).join(' / ');
+            } else if (typeof songObj.artist === 'string') {
+                artistName = songObj.artist;
+            }
+        }
+
+        // 提取歌詞
+        const lrcContent = lyricData.lrc?.lyric || lyricData.lyric || "";
+        const yrcContent = lyricData.yrc?.lyric || "";
+
         return res.status(200).json({
             success: true,
             songId: songId,
-            name: detailData.songs?.[0]?.name || detailData.name || "未知歌曲",
-            artist: detailData.songs?.[0]?.ar?.[0]?.name || detailData.ar?.[0]?.name || "未知歌手",
-            lrc: lyricData.lrc?.lyric || "",
-            yrc: lyricData.yrc?.lyric || ""
+            name: songName || "未知歌曲",
+            artist: artistName || "未知歌手",
+            lrc: lrcContent,
+            yrc: yrcContent
         });
 
     } catch (error) {
